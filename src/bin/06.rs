@@ -4,6 +4,8 @@ use code_timing_macros::time_snippet;
 use const_format::concatcp;
 use std::fs::File;
 use std::io::{BufRead, BufReader};
+use std::sync::{Arc, Mutex};
+use std::thread;
 
 const DAY: &str = "06";
 const INPUT_FILE: &str = concatcp!("input/", DAY, ".txt");
@@ -137,20 +139,60 @@ fn main() -> Result<()> {
     fn part2<R: BufRead>(reader: R) -> Result<usize> {
         let map = parse_map(reader)?;
 
-        let mut possible_pos = 0;
+        // Single threaded brute force approach
+        // let mut possible_pos = 0;
+        // for (y, row) in map.iter().enumerate() {
+        //     for (x, cell) in row.iter().enumerate() {
+        //         if *cell != '#' && *cell != '^' {
+        //             let mut map_copy = map.clone();
+        //             map_copy[y][x] = '#';
+        //             if traverse_map(&mut map_copy) {
+        //                 possible_pos += 1;
+        //             }
+        //         }
+        //     }
+        // }
+        // let result = possible_pos;
 
-        for (y, row) in map.iter().enumerate() {
-            for (x, cell) in row.iter().enumerate() {
-                if *cell != '#' && *cell != '^' {
-                    let mut map_copy = map.clone();
-                    map_copy[y][x] = '#';
-                    if traverse_map(&mut map_copy) {
-                        possible_pos += 1;
+        // Multi-threaded brute force approach
+        let map = Arc::new(map);
+        let possible_pos = Arc::new(Mutex::new(0));
+        let num_threads = 12;
+        let chunk_size = (map.len() + num_threads - 1) / num_threads;
+
+        let mut handles = vec![];
+
+        for i in 0..num_threads {
+            let map_clone = Arc::clone(&map);
+            let possible_pos_clone = Arc::clone(&possible_pos);
+
+            let handle = thread::spawn(move || {
+                let start = i * chunk_size;
+                let end = ((i + 1) * chunk_size).min(map_clone.len());
+
+                for y in start..end {
+                    for (x, &cell) in map_clone[y].iter().enumerate() {
+                        if cell != '#' && cell != '^' {
+                            let mut map_copy = map_clone.as_ref().clone();
+                            map_copy[y][x] = '#';
+                            if traverse_map(&mut map_copy) {
+                                let mut pos = possible_pos_clone.lock().unwrap();
+                                *pos += 1;
+                            }
+                        }
                     }
                 }
-            }
+            });
+
+            handles.push(handle);
         }
-        Ok(possible_pos)
+
+        for handle in handles {
+            handle.join().unwrap();
+        }
+        let result = *possible_pos.lock().unwrap();
+
+        Ok(result)
     }
 
     assert_eq!(6, part2(BufReader::new(TEST.as_bytes()))?);
